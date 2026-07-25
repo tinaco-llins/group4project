@@ -28,16 +28,94 @@
 				}
 			});
 		}
+
+		function SubmitFeedbackHandler() {
+			var problem = document.getElementById("problem").value.trim();
+			var suggestedSolution = document.getElementById("suggestedSolution").value.trim();
+			var employeeName = document.getElementById("employeeName").value.trim();
+			var statusDiv = document.getElementById("feedbackStatus");
+
+			if (problem === "" || suggestedSolution === "") {
+				statusDiv.innerText = "Please enter both a problem and a suggested solution.";
+				return;
+			}
+
+			var webMethod = "ProjectServices.asmx/SubmitFeedback";
+			var parameters = JSON.stringify({
+				employeeName: employeeName,
+				problem: problem,
+				suggestedSolution: suggestedSolution
+			});
+
+            $.ajax({
+                type: "POST",
+                url: webMethod,
+                data: parameters,
+                contentType: "application/json; charset=utf-8",
+                dataType: "json",
+                success: function (msg) {
+					var responseFromServer = JSON.parse(msg.d);
+					statusDiv.innerText = responseFromServer.message;
+
+					if (responseFromServer.success) {
+						document.getElementById("employeeName").value = "";
+                        document.getElementById("problem").value = "";
+                        document.getElementById("suggestedSolution").value = "";
+					}
+                },
+                error: function (e) {
+					statusDiv.innerText = "Something went wrong submitting you feedback.";
+                }
+            });
+		}
+
 	</script>
 	<!--END OF YOUR OWN JAVASCRIPT-->
 
 	<!--AND YOUR OWN CSS CAN GO HERE AS WELL-->
 	<style>
 
+		#feedbackForm{
+			max-width: 400px;
+			margin-top: 20px;
+		}
+
+		#feedbackForm label {
+			display: block;
+			font-weight: bold;
+			margin-top: 10px;
+		}
+
+		#feedbackForm input, #feedbackForm textarea {
+			width: 100%;
+			padding: 6px;
+			margin-top: 4px;
+		}
+
+		#feedbackStatus {
+			margin-top: 10px;
+			font-weight: bold;
+		}
+
 	</style>
 	<!--END OF YOUR OWN CSS-->
 </head >
 <body>
 	<button onclick="javascript: TestButtonHandler();">Click here to test connection!</button>
+
+	<h2>Submit Feedback</h2>
+	<div id="feedbackForm">
+		<label for="employeeName">Your Name</label>
+		<input type="text" id="employeeName" />
+
+		<label for="problem">Problem</label>
+		<textarea id="problem" rows="3"></textarea>
+
+		<label for="suggestedSolution">Suggested Solution</label>
+		<textarea id="suggestedSolution" rows="3"></textarea>
+
+		<button onclick="javascript: SubmitFeedbackHandler();">Submit Feedback</button>
+		<div id="feedbackStatus"></div>
+	</div>
 </body>
 </html >
