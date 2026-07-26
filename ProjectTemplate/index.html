@@ -1,43 +1,228 @@
-﻿<!DOCTYPE html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-	<meta charset="utf-8" />
-	<title></title>
-	<!--DO NOT FORGET THIS SCRIPT TAG SO YOU CAN USE JQUERY!!!!!-->
-	<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Anonymous Workplace Feedback</title>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+    <style>
+        :root {
+            --ink: #18212f;
+            --muted: #637083;
+            --surface: #ffffff;
+            --canvas: #f3f7f6;
+            --brand: #176b5b;
+            --brand-dark: #0f5145;
+            --line: #dce5e2;
+            --danger: #b42318;
+            --success-bg: #edf8f4;
+        }
 
-	<!--YOUR OWN JAVASCRIPT CAN GO RIGHT HERE-->
-	<script type="text/javascript">
-		function TestButtonHandler() {
-			var webMethod = "ProjectServices.asmx/TestConnection";
-			var parameters = "{}";
+        * { box-sizing: border-box; }
 
-			//jQuery ajax method
-			$.ajax({
-				type: "POST",
-				url: webMethod,
-				data: parameters,
-				contentType: "application/json; charset=utf-8",
-				dataType: "json",
-				success: function (msg) {
-					var responseFromServer = msg.d;
-					alert(responseFromServer);
-				},
-				error: function (e) {
-					alert("this code will only execute if javascript is unable to access the webservice");
-				}
-			});
-		}
-	</script>
-	<!--END OF YOUR OWN JAVASCRIPT-->
+        body {
+            margin: 0;
+            min-height: 100vh;
+            color: var(--ink);
+            background:
+                radial-gradient(circle at 8% 5%, #dcefe9 0, transparent 28rem),
+                var(--canvas);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
 
-	<!--AND YOUR OWN CSS CAN GO HERE AS WELL-->
-	<style>
+        main {
+            width: min(680px, calc(100% - 40px));
+            margin: 56px auto 72px;
+        }
 
-	</style>
-	<!--END OF YOUR OWN CSS-->
-</head >
+        .card {
+            padding: 38px;
+            border: 1px solid rgba(23,107,91,.12);
+            border-radius: 24px;
+            background: var(--surface);
+            box-shadow: 0 24px 70px rgba(26, 64, 56, .10);
+        }
+
+        .card h2 { margin: 0 0 7px; font-size: 26px; letter-spacing: -.025em; }
+        .card-subtitle { margin: 0 0 28px; color: var(--muted); }
+
+        label {
+            display: block;
+            margin: 22px 0 9px;
+            font-size: 14px;
+            font-weight: 700;
+        }
+
+        input, select, textarea {
+            width: 100%;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: #fbfcfc;
+            color: var(--ink);
+            font: inherit;
+            outline: none;
+            transition: border-color .15s, box-shadow .15s;
+        }
+
+        input, select { height: 50px; padding: 0 14px; }
+        textarea { min-height: 190px; padding: 14px; line-height: 1.5; resize: vertical; }
+
+        input:focus, select:focus, textarea:focus {
+            border-color: var(--brand);
+            box-shadow: 0 0 0 3px rgba(23,107,91,.12);
+        }
+
+        .field-meta {
+            margin-top: 7px;
+            display: flex;
+            justify-content: space-between;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        button {
+            width: 100%;
+            height: 52px;
+            margin-top: 24px;
+            border: 0;
+            border-radius: 12px;
+            color: white;
+            background: var(--brand);
+            font: inherit;
+            font-weight: 750;
+            cursor: pointer;
+            transition: background .15s, transform .15s;
+        }
+
+        button:hover { background: var(--brand-dark); transform: translateY(-1px); }
+        button:disabled { opacity: .65; cursor: wait; transform: none; }
+
+        .status {
+            display: none;
+            margin-top: 18px;
+            padding: 14px 16px;
+            border-radius: 12px;
+            font-size: 14px;
+            line-height: 1.45;
+        }
+
+        .status.error { display: block; color: var(--danger); background: #fef3f2; }
+        .status.success { display: block; color: var(--brand-dark); background: var(--success-bg); }
+        .reference { display: block; margin-top: 5px; font-weight: 750; }
+
+        @media (max-width: 820px) {
+            main { margin-top: 24px; }
+            .card { padding: 26px; }
+        }
+    </style>
+</head>
 <body>
-	<button onclick="javascript: TestButtonHandler();">Click here to test connection!</button>
+    <main>
+        <section class="card" aria-labelledby="form-title">
+            <h2 id="form-title">Anonymous Feedback</h2>
+            <p class="card-subtitle">Submit a workplace problem and a proposed solution. No login or personal information is required.</p>
+
+            <form id="feedbackForm" novalidate>
+                <label for="category">What is this about?</label>
+                <select id="category" required>
+                    <option value="">Select a category</option>
+                    <option>Technology</option>
+                    <option>Tools</option>
+                    <option>Interpersonal</option>
+                    <option>Culture</option>
+                    <option>Benefits</option>
+                    <option>Salary</option>
+                </select>
+
+                <label for="problem_header">Problem header</label>
+                <input id="problem_header" type="text" minlength="5" maxlength="120"
+                    placeholder="Briefly summarize the problem" required />
+                <div class="field-meta">
+                    <span>5–120 characters</span>
+                    <span id="headerCharacterCount">0 / 120</span>
+                </div>
+
+                <label for="proposed_solution">Proposed solution</label>
+                <textarea id="proposed_solution" minlength="5" maxlength="2000"
+                    placeholder="Describe how you think this could be improved…" required></textarea>
+                <div class="field-meta">
+                    <span>Minimum 5 characters</span>
+                    <span id="solutionCharacterCount">0 / 2,000</span>
+                </div>
+
+                <button id="submitButton" type="submit">Submit anonymously</button>
+                <div id="status" class="status" role="status" aria-live="polite"></div>
+            </form>
+        </section>
+    </main>
+
+    <script>
+        (function () {
+            var $form = $("#feedbackForm");
+            var $problemHeader = $("#problem_header");
+            var $proposedSolution = $("#proposed_solution");
+            var $status = $("#status");
+            var $button = $("#submitButton");
+
+            $problemHeader.on("input", function () {
+                $("#headerCharacterCount").text(this.value.length + " / 120");
+            });
+
+            $proposedSolution.on("input", function () {
+                $("#solutionCharacterCount").text(
+                    this.value.length.toLocaleString() + " / 2,000");
+            });
+
+            // Validate the form before sending it to the backend.
+            $form.on("submit", function (event) {
+                event.preventDefault();
+                var category = $("#category").val();
+                var problemHeader = $problemHeader.val().trim();
+                var proposedSolution = $proposedSolution.val().trim();
+
+                $status.removeClass("error success").hide().empty();
+                if (!category ||
+                    problemHeader.length < 5 ||
+                    proposedSolution.length < 5) {
+                    $status.addClass("error").text(
+                        "Choose a category and complete both fields.").show();
+                    return;
+                }
+
+                $button.prop("disabled", true).text("Submitting…");
+
+                $.ajax({
+                    type: "POST",
+                    url: "ProjectServices.asmx/SubmitFeedback",
+                    data: JSON.stringify({
+                        problem_header: problemHeader,
+                        proposed_solution: proposedSolution,
+                        category: category
+                    }),
+                    contentType: "application/json; charset=utf-8",
+                    dataType: "json"
+                }).done(function (response) {
+                    var result = response.d;
+                    if (result.Ok) {
+                        $status.addClass("success").html(
+                            $("<div>").text(result.Message).html() +
+                            "<span class='reference'>Reference: " +
+                            $("<div>").text(result.ReferenceNumber).html() + "</span>"
+                        ).show();
+                        $form[0].reset();
+                        $("#headerCharacterCount").text("0 / 120");
+                        $("#solutionCharacterCount").text("0 / 2,000");
+                    } else {
+                        $status.addClass("error").text(result.Message).show();
+                    }
+                }).fail(function () {
+                    $status.addClass("error").text(
+                        "We could not submit your feedback. Please try again.").show();
+                }).always(function () {
+                    $button.prop("disabled", false).text("Submit anonymously");
+                });
+            });
+        }());
+    </script>
 </body>
-</html >
+</html>

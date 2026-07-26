@@ -1,66 +1,126 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Web;
+using System;
+using System.Configuration;
 using System.Web.Services;
-using MySql.Data;
 using MySql.Data.MySqlClient;
-using System.Data;
 
 namespace ProjectTemplate
 {
-	[WebService(Namespace = "http://tempuri.org/")]
-	[WebServiceBinding(ConformsTo = WsiProfiles.BasicProfile1_1)]
-	[System.ComponentModel.ToolboxItem(false)]
-	[System.Web.Script.Services.ScriptService]
+    [WebService(Namespace = "http://tempuri.org/")]
+    [WebServiceBinding(ConformsTo = WsiProfiles.BasicProfile1_1)]
+    [System.ComponentModel.ToolboxItem(false)]
+    [System.Web.Script.Services.ScriptService]
+    public class ProjectServices : WebService
+    {
+        private static readonly string[] AllowedCategories =
+        {
+            "Technology", "Tools", "Interpersonal", "Culture", "Benefits", "Salary"
+        };
 
-	public class ProjectServices : System.Web.Services.WebService
-	{
-		////////////////////////////////////////////////////////////////////////
-		///replace the values of these variables with your database credentials
-		////////////////////////////////////////////////////////////////////////
-		private string dbID = "cis440template";
-		private string dbPass = "!!Cis440";
-		private string dbName = "cis440template";
-		////////////////////////////////////////////////////////////////////////
-		
-		////////////////////////////////////////////////////////////////////////
-		///call this method anywhere that you need the connection string!
-		////////////////////////////////////////////////////////////////////////
-		private string getConString() {
-			return "SERVER=107.180.1.16; PORT=3306; DATABASE=" + dbName+"; UID=" + dbID + "; PASSWORD=" + dbPass;
-		}
-		////////////////////////////////////////////////////////////////////////
+        private string GetConnectionString()
+        {
+            ConnectionStringSettings setting =
+                ConfigurationManager.ConnectionStrings["WorkplaceFeedback"];
 
+            if (setting == null || String.IsNullOrWhiteSpace(setting.ConnectionString))
+            {
+                throw new ConfigurationErrorsException(
+                    "The WorkplaceFeedback connection string is not configured.");
+            }
 
+            return setting.ConnectionString;
+        }
 
-		/////////////////////////////////////////////////////////////////////////
-		//don't forget to include this decoration above each method that you want
-		//to be exposed as a web service!
-		[WebMethod(EnableSession = true)]
-		/////////////////////////////////////////////////////////////////////////
-		public string TestConnection()
-		{
-			try
-			{
-				string testQuery = "select * from test";
+        [WebMethod]
+        public FeedbackResponse SubmitFeedback(
+            string problem_header,
+            string proposed_solution,
+            string category)
+        {
+            // Validate anonymous feedback before saving it.
+            problem_header = (problem_header ?? String.Empty).Trim();
+            proposed_solution = (proposed_solution ?? String.Empty).Trim();
+            category = (category ?? String.Empty).Trim();
 
-				////////////////////////////////////////////////////////////////////////
-				///here's an example of using the getConString method!
-				////////////////////////////////////////////////////////////////////////
-				MySqlConnection con = new MySqlConnection(getConString());
-				////////////////////////////////////////////////////////////////////////
+            if (Array.IndexOf(AllowedCategories, category) < 0)
+            {
+                return FeedbackResponse.Failure("Please select a valid category.");
+            }
 
-				MySqlCommand cmd = new MySqlCommand(testQuery, con);
-				MySqlDataAdapter adapter = new MySqlDataAdapter(cmd);
-				DataTable table = new DataTable();
-				adapter.Fill(table);
-				return "Success!";
-			}
-			catch (Exception e)
-			{
-				return "Something went wrong, please check your credentials and db name and try again.  Error: "+e.Message;
-			}
-		}
-	}
+            if (problem_header.Length < 5 || problem_header.Length > 120)
+            {
+                return FeedbackResponse.Failure(
+                    "Problem header must be between 5 and 120 characters.");
+            }
+
+            if (proposed_solution.Length < 5 || proposed_solution.Length > 2000)
+            {
+                return FeedbackResponse.Failure(
+                    "Proposed solution must be between 5 and 2,000 characters.");
+            }
+
+            string referenceNumber = "FB-" +
+                Guid.NewGuid().ToString("N").Substring(0, 8).ToUpperInvariant();
+
+            // Use parameters to safely insert the feedback.
+            const string sql = @"
+                INSERT INTO anonymous_feedback
+                    (reference_number, problem_header, proposed_solution, category)
+                VALUES
+                    (@referenceNumber, @problemHeader, @proposedSolution, @category);";
+
+            try
+            {
+                using (MySqlConnection connection =
+                    new MySqlConnection(GetConnectionString()))
+                using (MySqlCommand command = new MySqlCommand(sql, connection))
+                {
+                    command.Parameters.Add("@referenceNumber",
+                        MySqlDbType.VarChar, 11).Value = referenceNumber;
+                    command.Parameters.Add("@problemHeader",
+                        MySqlDbType.VarChar, 120).Value = problem_header;
+                    command.Parameters.Add("@proposedSolution",
+                        MySqlDbType.Text).Value = proposed_solution;
+                    command.Parameters.Add("@category",
+                        MySqlDbType.VarChar, 50).Value = category;
+
+                    connection.Open();
+                    command.ExecuteNonQuery();
+                }
+
+                return FeedbackResponse.Success(referenceNumber);
+            }
+            catch (Exception)
+            {
+                return FeedbackResponse.Failure(
+                    "We could not save your feedback right now. Please try again.");
+            }
+        }
+    }
+
+    public class FeedbackResponse
+    {
+        public bool Ok { get; set; }
+        public string Message { get; set; }
+        public string ReferenceNumber { get; set; }
+
+        public static FeedbackResponse Success(string referenceNumber)
+        {
+            return new FeedbackResponse
+            {
+                Ok = true,
+                Message = "Your feedback was submitted anonymously.",
+                ReferenceNumber = referenceNumber
+            };
+        }
+
+        public static FeedbackResponse Failure(string message)
+        {
+            return new FeedbackResponse
+            {
+                Ok = false,
+                Message = message,
+                ReferenceNumber = null
+            };
+        }
+    }
 }
