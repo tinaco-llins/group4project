@@ -95,7 +95,69 @@ namespace ProjectTemplate
                     "We could not save your feedback right now. Please try again.");
             }
         }
-    }
+    
+
+    [WebMethod(EnableSession = true)]
+        public LoginResponse ManagerLogin(string username, string password)
+        {
+            username = (username ?? String.Empty).Trim();
+            password = password ?? String.Empty;
+
+            if (username.Length == 0 || password.Length == 0)
+            {
+                return LoginResponse.Failure(
+                    "Please enter a username and password."
+                    );
+            }
+
+            const string sql = @"
+SELECT manager_id
+FROM managers
+WHERE username = @username
+AND password_hash = SHA2(@password, 256)
+LIMIT 1;";
+
+            try
+            {
+                using (MySqlConnection connection =
+                    new MySqlConnection(GetConnectionString()))
+                using (MySqlCommand command =
+                new MySqlCommand(sql, connection))
+                {
+                    command.Parameters.Add(
+                        "@username",
+                        MySqlDbType.VarChar,
+                        50
+                        ).Value = username;
+
+                    command.Parameters.Add(
+                        "@password",
+                        MySqlDbType.VarChar,
+                        255
+                        ).Value = password;
+
+                    connection.Open();
+                    object result = command.ExecuteScalar();
+
+                    if (result == null)
+                    {
+                        return LoginResponse.Failure(
+                            "Invalid username or password."
+                            );
+                    }
+                    Session["ManagerLoggedIn"] = true;
+                    Session["ManagerUsername"] = username;
+
+                    return LoginResponse.Success(username);
+                }
+            }
+            catch (Exception)
+            {
+                return LoginResponse.Failure(
+                    "We are unable to log you in. Please try again."
+                    );
+            }
+        }
 
     public class FeedbackResponse
     {
@@ -124,3 +186,29 @@ namespace ProjectTemplate
         }
     }
 }
+    public class LoginResponse
+    {
+        public bool Ok { get; set; }
+        public string Message { get; set; }
+        public string Username { get; set; }
+
+        public static LoginResponse Success(string username)
+        {
+            return new LoginResponse
+            {
+                Ok = true,
+                Message = "Login successful.",
+                Username = username
+            };
+        }
+        public static LoginResponse Failure(string message)
+        {
+            return new LoginResponse
+            {
+                Ok = false,
+                Message = message,
+                Username = null
+            };
+        }
+    }
+    }

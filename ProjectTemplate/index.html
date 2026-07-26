@@ -154,6 +154,58 @@
                 <div id="status" class="status" role="status" aria-live="polite"></div>
             </form>
         </section>
+
+        <section id="managerLoginCard" class="card">
+            <h2>Manager Login</h2>
+
+            <p class="card-subtitle">
+                Authorized managers can log in to view the administrative dashboard.
+            </p>
+
+            <form id="managerLoginForm" novalidate>
+                <label for="managerUsername">Username</label>
+                <input
+                       id="managerUsername"
+                       type="text"
+                       maxlength="50"
+                       autocomplete="username"
+                       placeholder="Enter Username"
+                       required
+                       />
+
+                <label for="managerPassword">Password</label>
+                <input
+                       id="managerPassword"
+                       type="password"
+                       autocomplete="current-password"
+                       placeholder="Enter Password"
+                       required
+                       />
+
+                <button id="managerLoginButton" type="submit">
+                    Log in
+                </button>
+
+                <div
+                     id="loginStatus"
+                     class="status"
+                     role="status"
+                     aria-live="polite"
+                     ></div>
+            </form>
+        </section>
+
+        <section id="managerDashboard" class="card" style="display: none;">
+            <h2>Administrative Dashboard</h2>
+
+            <p>
+                Welcome, <strong id="managerDisplayName"></strong>.
+            </p>
+
+            <p>
+                You are successfully logged in.
+            </p>
+        </section>
     </main>
 
     <script>
@@ -222,7 +274,69 @@
                     $button.prop("disabled", false).text("Submit anonymously");
                 });
             });
-        }());
+
+            // manager login
+            var $managerLoginForm = $("#managerLoginForm");
+            var $managerUsername = $("#managerUsername");
+            var $managerPassword = $("#managerPassword");
+            var $managerLoginButton = $("#managerLoginButton");
+            var $loginStatus = $("#loginStatus");
+
+            $managerLoginForm.on("submit", function (event) {
+                event.preventDefault();
+
+                var username = $managerUsername.val().trim();
+                var password = $managerPassword.val();
+
+                $loginStatus.removeClass("error success").hide().empty();
+
+                if (!username || !password) {
+                    $loginStatus.addClass("error")
+                        .text("Please enter a username and password.")
+                        .show();
+                    return;
+                }
+
+                $managerLoginButton
+                    .prop("disabled", true)
+                    .text("Logging in...");
+
+                $.ajax({
+                    type: "POST",
+                    url: "ProjectServices.asmx/ManagerLogin",
+                    data: JSON.stringify({
+                        username: username,
+                        password: password
+                    }),
+                    contentType: "application/json; charset=utf-8",
+                    dataType: "json"
+                }).done(function (response) {
+                    var result = response.d;
+
+                    if (result.Ok) {
+                        $("#managerLoginCard").hide();
+                        $("#managerDisplayName").text(result.Username);
+                        $("#managerDashboard").show();
+                    }
+                    else {
+                        $loginStatus
+                            .addClass("error")
+                            .text(result.Message)
+                            .show();
+                    }
+                }).fail(function () {
+                    $loginStatus
+                        .addClass("error")
+                        .text("We are unable to log you in. Please try again.")
+                            .show();
+                }).always(function () {
+                    $managerLoginButton
+                        .prop("disabled", false)
+                        .text("Log in");
+                });
+            });
+
+        })();
     </script>
 </body>
 </html>
