@@ -30,3 +30,15 @@ CREATE TABLE IF NOT EXISTS anonymous_feedback (
         CHAR_LENGTH(proposed_solution) BETWEEN 5 AND 2000
     )
 ) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS managers (
+manager_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+username VARCHAR(50) NOT NULL,
+password_hash CHAR(64) NOT NULL,
+
+PRIMARY KEY (manager_id),
+UNIQUE KEY uq_manager_username (username)
+) ENGINE=InnoDB;
+
+INSERT IGNORE INTO managers (username, password_hash)
+VALUES ('manager', SHA2('password123', 256));
