@@ -109,6 +109,70 @@
         .status.error { display: block; color: var(--danger); background: #fef3f2; }
         .status.success { display: block; color: var(--brand-dark); background: var(--success-bg); }
         .reference { display: block; margin-top: 5px; font-weight: 750; }
+        
+        /*Feed*/
+       .feed-header {
+           display: flex;
+           align-items: baseline;
+           justify-content: space-between;
+       }
+
+       .feed-refresh {
+           width: auto;
+           height: auto;
+           margin: 0;
+           padding: 8px 14px;
+           font-size: 13px;
+           font-weight: 700;
+           background: transparent;
+           color: var(--brand-dark);
+           border: 1px solid var(--line);
+       }
+
+       .feed-refresh:hover { background: var(--success-bg); transform: none; }
+
+       .feed-empty, .feed-loading {
+           color: var(--muted);
+           font-size: 14px;
+           padding:8px 0;
+       }
+
+       .feed-item {
+           padding: 18px 0;
+           border-top: 1px solid var(--line);
+       }
+
+       .feed-item:first-of-type { border-top: none; padding-top: 0; }
+
+       .feed-item-meta {
+           display: flex;
+           gap: 10px;
+           align-items: center;
+           font-size: 12px;
+           color: var(--muted);
+           margin-bottom: 6px;
+       }
+
+       .feed-category {
+           display: inline-block;
+           padding: 3px 10px;
+           border-radius: 999px;
+           background: var(--success-bg);
+           color: var(--brand-dark);
+           font-weight: 700;
+       }
+
+       .feed-item h3 {
+           margin: 0 0 6px; 
+           font-size: 17px;
+       }
+
+       .feed-item p { 
+           margin: 0; 
+           color: var(--ink); 
+           line-height: 1.5; 
+           white-space: pre-wrap;
+       }
 
         @media (max-width: 820px) {
             main { margin-top: 24px; }
@@ -153,6 +217,25 @@
                 <button id="submitButton" type="submit">Submit anonymously</button>
                 <div id="status" class="status" role="status" aria-live="polite"></div>
             </form>
+        </section>
+
+        <section class="card" aria-labelledby="feed-title">
+            <div class="feed-header">
+                <div>
+                    <h2 id="feed-title">Suggestions from your coworkers</h2>
+                    <p class="card-subtitle" style="margin-bottom: 0;">
+                        Every anonymous suggestion that's been submitted, newest first.
+                    </p>
+                </div>
+                <button id="feedRefreshButton" type="button" class="feed-refresh">Refresh</button>
+            </div>
+
+            <div id="feedLoading" class="feed-loading">Loading suggestions...</div>
+
+            <div id="feedStatus" class="status"></div>
+
+            <div id="feedList"></div>
+
         </section>
 
         <section id="managerLoginCard" class="card">
@@ -264,6 +347,10 @@
                         $form[0].reset();
                         $("#headerCharacterCount").text("0 / 120");
                         $("#solutionCharacterCount").text("0 / 2,000");
+
+                        // Refresh the feed so the new submission shows up immediately.
+                        loadFeed();
+
                     } else {
                         $status.addClass("error").text(result.Message).show();
                     }
@@ -274,6 +361,77 @@
                     $button.prop("disabled", false).text("Submit anonymously");
                 });
             });
+
+            // Suggestions feed
+            var $feedLoading = $("#feedLoading");
+            var $feedStatus = $("#feedStatus");
+            var $feedList = $("#feedList");
+            var $feedRefreshButton = $("#feedRefreshButton");
+
+            function escapeHtml(value){
+                return $("<div>").text(value).html();
+            }
+
+            function renderFeed(items) {
+                $feedList.empty();
+                
+                if (!items || items.length === 0){
+                    $feedList.append(
+                        '<div class="feed-empty">No suggestions have been submitted yet.</div>');
+                        return;
+                }
+
+                items.forEach(function (item) {
+                    var $entry = $('<div class="feed-item"></div>');
+
+                    $entry.append(
+                        '<div class="feed-item-meta">' +
+                        '<span class="feed-category">' + escapeHtml(item.Category) + '</span>' +
+                        '<span>' + escapeHtml(item.SubmittedAt) + '</span>' +
+                        '<span>' + escapeHtml(item.ReferenceNumber) + '</span>' +
+                        '</div>'
+                    );
+
+                    $entry.append('<h3>' + escapeHtml(item.ProblemHeader) + '</h3>');
+
+                    $entry.append('<p>' + escapeHtml(item.ProposedSolution) + '</p>');
+
+                    $feedList.append($entry);
+                });
+            }
+
+            function loadFeed() {
+                $feedStatus.removeClass("error success").hide().empty();
+                $feedLoading.show();
+                $feedRefreshButton.prop("disabled", true);
+
+                $.ajax({
+                    type: "POST",
+                    url: "ProjectServices.asmx/GetFeedbackFeed",
+                    data: JSON.stringify({}),
+                    contentType: "application/json; charset=utf-8",
+                    dataType: "json",
+                }).done(function (response) {
+                    var result = response.d;
+
+                    if (result.Ok){
+                        renderFeed(result.Items);
+                    } else {
+                        $feedStatus.addClass("error").text(result.Message).show();
+                    }
+                }).fail(function () {
+                    $feedStatus.addClass("error").text(
+                    "We could not load the suggestions feed. Please try again.").show();
+                }).always(function () {
+                    $feedLoading.hide();
+                    $feedRefreshButton.prop("disabled", false);
+                });
+            }
+
+            $feedRefreshButton.on("click", loadFeed);
+
+            // Load the feed as soon as the page is ready.
+            loadFeed();
 
             // manager login
             var $managerLoginForm = $("#managerLoginForm");

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Configuration;
 using System.Web.Services;
 using MySql.Data.MySqlClient;
@@ -95,7 +96,51 @@ namespace ProjectTemplate
                     "We could not save your feedback right now. Please try again.");
             }
         }
-    
+
+    [WebMethod]
+        public FeedbackFeedResponse GetFeedbackFeed()
+        {
+            //Return every submitted suggestion, newest first, for the employee-facing feed. No identifying info is returned since submissions are anonymous.
+            const string sql = @"
+SELECT feedback_id, reference_number, problem_header, proposed_solution, category, submitted_at_utc
+FROM anonymous_feedback
+Order BY submitted_at_utc DESC;";
+
+            var items = new List<FeedbackItem>();
+
+            try
+            {
+                using (MySqlConnection connection = new MySqlConnection(GetConnectionString()))
+                
+                using (MySqlCommand command = new MySqlCommand(sql,connection))
+                {
+                    connection.Open();
+
+                    using (MySqlDataReader reader = command.ExecuteReader())
+                    {
+                        while (reader.Read())
+                            {
+                            items.Add(new FeedbackItem
+                                {
+                                Id = reader.GetInt64("feedback_id"), 
+                                ReferenceNumber = reader.GetString("reference_number"),
+                                ProposedSolution = reader.GetString("proposed_solution"),
+                                Category = reader.GetString("Category"),
+                                SubmittedAt = reader.GetDateTime("submitted_at_utc")
+                                    .ToString("yyyy-MM-dd HH:mm")
+                            });
+                        }
+                    }
+                }
+                return FeedbackFeedResponse.Success(items);
+            }
+            catch (Exception)
+            {
+                return FeedbackFeedResponse.Failure(
+                    "We could not load the feedback feed right now. Please try again.");
+            }
+        
+        }
 
     [WebMethod(EnableSession = true)]
         public LoginResponse ManagerLogin(string username, string password)
@@ -186,6 +231,42 @@ LIMIT 1;";
         }
     }
 }
+
+    public class FeedbackItem
+    {
+        public long Id { get; set; }
+        public string ReferenceNumber { get; set; }
+        public string ProblemHeader { get; set; }
+        public string ProposedSolution { get; set; }
+        public string Category { get; set; }
+        public string SubmittedAt { get; set; }
+    }
+
+    public class FeedbackFeedResponse
+    {
+        public bool Ok { get; set; }
+        public string Message { get; set; }
+        public List<FeedbackItem> Items { get; set; }
+
+        public static FeedbackFeedResponse Success(List<FeedbackItem> items)
+        {
+            return new FeedbackFeedResponse {
+                Ok = true,
+                Message = null,
+                Items = items };
+        }
+
+        public static FeedbackFeedResponse Failure(string message)
+        {
+            return new FeedbackFeedResponse
+            {
+                Ok = false,
+                Message = message,
+                Items = new List<FeedbackItem>()
+            };
+        }
+    }
+
     public class LoginResponse
     {
         public bool Ok { get; set; }
