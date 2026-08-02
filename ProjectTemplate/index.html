@@ -313,9 +313,7 @@
                 Welcome, <strong id="managerDisplayName"></strong>.
             </p>
 
-            <p>
-                You are successfully logged in.
-            </p>
+          <div id="managerFeedbackList"></div>
         </section>
     </main>
 
@@ -411,7 +409,8 @@
 
                 items.forEach(function (item) {
                     var $entry = $('<div class="feed-item"></div>');
-
+                    var currentStatus = item.Status || "Pending";
+                    var managerComment = item.ManagerComment || "";
                     $entry.append(
                         '<div class="feed-item-meta">' +
                         '<span class="feed-category">' + escapeHtml(item.Category) + '</span>' +
@@ -423,6 +422,13 @@
                     $entry.append('<h3>' + escapeHtml(item.ProblemHeader) + '</h3>');
 
                     $entry.append('<p>' + escapeHtml(item.ProposedSolution) + '</p>');
+                    $entry.append('<p><strong>Status:</strong> ' + escapeHtml(currentStatus) + '</p>');
+
+                    if (managerComment) {
+                        $entry.append(
+                            '<p><strong>Manager comment:</strong> ' + escapeHtml(managerComment) + '</p>'
+                        );
+                    }
 
                     var voteLabel = item.UpvoteCount === 1 ? "upvote" : "upvotes";
                     $entry.append(
@@ -434,6 +440,42 @@
                         '<span class="upvote-error" role="status"></span>' +
                         '</div>'
                     );
+                    if (managerLoggedIn) {
+                        var $managerControls = $(
+                            '<div class="manager-controls">' +
+                            '<label>Status</label>' +
+                            '<select class="manager-status">' +
+                            '<option value="Pending">Pending</option>' +
+                            '<option value="Accepted">Accepted</option>' +
+                            '<option value="Denied">Denied</option>' +
+                            '</select>' +
+                            '<label>Manager comment</label>' +
+                            '<textarea class="manager-comment" maxlength="1000" ' +
+                            'placeholder="Optional explanation"></textarea>' +
+                            '<button type="button" class="update-status-button">' +
+                            'Update status' +
+                            '</button>' +
+                            '<div class="manager-update-message" role="status"></div>' +
+                            '</div>'
+                        );
+
+                        $managerControls
+                            .find(".manager-status")
+                            .val(currentStatus);
+
+                        $managerControls
+                            .find(".manager-comment")
+                            .val(managerComment);
+
+                        $managerControls.attr(
+                            "data-feedback-id",
+                            item.Id
+                        );
+
+                        $entry.append($managerControls);
+                    }
+
+
 
                     $feedList.append($entry);
                 });
@@ -476,6 +518,79 @@
                 });
             });
 
+            $feedList.on("click", ".update-status-button", function () {
+                var $button = $(this);
+                var $controls = $button.closest(".manager-controls");
+                var $message = $controls.find(".manager-update-message");
+
+                var feedbackId = parseInt(
+                    $controls.attr("data-feedback-id"),
+                    10
+                );
+
+                var status = $controls.find(".manager-status").val();
+                var managerComment = $controls
+                    .find(".manager-comment")
+                    .val()
+                    .trim();
+
+                $message
+                    .removeClass("error success")
+                    .hide()
+                    .empty();
+
+                if (!feedbackId || feedbackId <= 0) {
+                    $message
+                        .addClass("error")
+                        .text("This suggestion has an invalid feedback ID.")
+                        .show();
+
+                    return;
+                }
+
+                $button
+                    .prop("disabled", true)
+                    .text("Updating...");
+
+                $.ajax({
+                    type: "POST",
+                    url: "ProjectServices.asmx/UpdateFeedbackStatus",
+                    data: JSON.stringify({
+                        feedbackId: feedbackId,
+                        status: status,
+                        managerComment: managerComment
+                    }),
+                    contentType: "application/json; charset=utf-8",
+                    dataType: "json"
+                }).done(function (response) {
+                    var result = response.d;
+
+                    if (result.Ok) {
+                        $message
+                            .addClass("success")
+                            .text(result.Message)
+                            .show();
+
+                        loadFeed();
+                    } else {
+                        $message
+                            .addClass("error")
+                            .text(result.Message)
+                            .show();
+                    }
+                }).fail(function () {
+                    $message
+                        .addClass("error")
+                        .text("The feedback status could not be updated. Please try again.")
+                        .show();
+                }).always(function () {
+                    $button
+                        .prop("disabled", false)
+                        .text("Update status");
+                });
+            });
+
+
             function loadFeed() {
                 $feedStatus.removeClass("error success").hide().empty();
                 $feedLoading.show();
@@ -515,6 +630,7 @@
             var $managerPassword = $("#managerPassword");
             var $managerLoginButton = $("#managerLoginButton");
             var $loginStatus = $("#loginStatus");
+            var managerLoggedIn = false;
 
             $managerLoginForm.on("submit", function (event) {
                 event.preventDefault();
@@ -548,9 +664,13 @@
                     var result = response.d;
 
                     if (result.Ok) {
+                        managerLoggedIn = true;
+
                         $("#managerLoginCard").hide();
                         $("#managerDisplayName").text(result.Username);
                         $("#managerDashboard").show();
+
+                        loadFeed();
                     }
                     else {
                         $loginStatus
