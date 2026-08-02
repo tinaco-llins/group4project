@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS anonymous_feedback (
     proposed_solution TEXT NOT NULL,
     category VARCHAR(50) NOT NULL,
     submitted_at_utc DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    upvote_count INT UNSIGNED NOT NULL DEFAULT 0,
 
     PRIMARY KEY (feedback_id),
     UNIQUE KEY uq_feedback_reference (reference_number),
