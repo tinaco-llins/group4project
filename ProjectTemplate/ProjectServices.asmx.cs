@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Configuration;
+using System.Security.Cryptography.X509Certificates;
 using System.Web.Services;
 using MySql.Data.MySqlClient;
 
@@ -15,6 +16,11 @@ namespace ProjectTemplate
         private static readonly string[] AllowedCategories =
         {
             "Technology", "Tools", "Interpersonal", "Culture", "Benefits", "Salary"
+        };
+
+        private static readonly string[] AllowedStatuses =
+        {
+            "Pending", "Accepted", "Denied"
         };
 
         private string GetConnectionString()
@@ -102,7 +108,7 @@ namespace ProjectTemplate
         {
             //Return every submitted suggestion, newest first, for the employee-facing feed. No identifying info is returned since submissions are anonymous.
             const string sql = @"
-SELECT feedback_id, reference_number, problem_header, proposed_solution, category, submitted_at_utc
+SELECT feedback_id, reference_number, problem_header, proposed_solution, category, submitted_at_utc, upvote_count, status, manager_comment
 FROM anonymous_feedback
 Order BY submitted_at_utc DESC;";
 
@@ -126,6 +132,11 @@ Order BY submitted_at_utc DESC;";
                                 ReferenceNumber = reader.GetString("reference_number"),
                                 ProposedSolution = reader.GetString("proposed_solution"),
                                 Category = reader.GetString("Category"),
+                                UpvoteCount = reader.GetInt32("upvote_count"),
+                                Status = reader.GetString("status"),
+                                ManagerComment = reader.IsDBNull(reader.GetOrdinal("manager_comment"))
+                                ? null
+                                : reader.GetString("manager_comment"),
                                 SubmittedAt = reader.GetDateTime("submitted_at_utc")
                                     .ToString("yyyy-MM-dd HH:mm")
                             });
@@ -142,7 +153,64 @@ Order BY submitted_at_utc DESC;";
         
         }
 
-    [WebMethod(EnableSession = true)]
+        [WebMethod]
+        public UpvoteResponse UpvoteFeedback(long? feedbackId)
+        {
+            if (!feedbackId.HasValue || feedbackId.Value <= 0)
+            {
+                return UpvoteResponse.Failure("A valid feedback ID is required.");
+            }
+
+            const string updateSql = @"
+UPDATE anonymous_feedback
+SET upvote_count = upvote_count + 1
+WHERE feedback_id = @feedbackId;";
+
+            const string countSql = @"
+SELECT upvote_count
+FROM anonymous_feedback
+WHERE feedback_id = @feedbackId;";
+
+            try
+            {
+                using (MySqlConnection connection =
+                    new MySqlConnection(GetConnectionString()))
+                {
+                    connection.Open();
+
+                    using (MySqlCommand updateCommand =
+                        new MySqlCommand(updateSql, connection))
+                    {
+                        updateCommand.Parameters.Add("@feedbackId",
+                            MySqlDbType.Int64).Value = feedbackId.Value;
+
+                        if (updateCommand.ExecuteNonQuery() == 0)
+                        {
+                            return UpvoteResponse.Failure(
+                                "The selected feedback could not be found.");
+                        }
+                    }
+
+                    using (MySqlCommand countCommand =
+                        new MySqlCommand(countSql, connection))
+                    {
+                        countCommand.Parameters.Add("@feedbackId",
+                            MySqlDbType.Int64).Value = feedbackId.Value;
+
+                        int upvoteCount = Convert.ToInt32(
+                            countCommand.ExecuteScalar());
+                        return UpvoteResponse.Success(upvoteCount);
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                return UpvoteResponse.Failure(
+                    "We could not record your upvote right now. Please try again.");
+            }
+        }
+
+        [WebMethod(EnableSession = true)]
         public LoginResponse ManagerLogin(string username, string password)
         {
             username = (username ?? String.Empty).Trim();
@@ -203,8 +271,93 @@ LIMIT 1;";
                     );
             }
         }
+            [WebMethod(EnableSession = true)]
+            public StatusUpdateResponse UpdateFeedbackStatus(
+                long? feedbackId,
+                string status,
+                string managerComment)
+            {
+                if (Session["ManagerLoggedIn"] == null ||
+                    !(bool)Session["ManagerLoggedIn"])
+                {
+                    return StatusUpdateResponse.Failure(
+                        "You must be logged in as a manager.");
+                }
 
-    public class FeedbackResponse
+                if (!feedbackId.HasValue || feedbackId.Value <= 0)
+                {
+                    return StatusUpdateResponse.Failure(
+                        "A valid feedback ID is required.");
+                }
+
+                status = (status ?? String.Empty).Trim();
+                managerComment = (managerComment ?? String.Empty).Trim();
+
+                if (Array.IndexOf(AllowedStatuses, status) < 0)
+                {
+                    return StatusUpdateResponse.Failure(
+                        "Please select a valid status.");
+                }
+
+                if (managerComment.Length > 1000)
+                {
+                    return StatusUpdateResponse.Failure(
+                        "The manager comment cannot exceed 1,000 characters.");
+                }
+
+                const string sql = @"
+UPDATE anonymous_feedback
+SET status = @status,
+    manager_comment = @managerComment
+WHERE feedback_id = @feedbackId;";
+
+                try
+                {
+                    using (MySqlConnection connection =
+                        new MySqlConnection(GetConnectionString()))
+                    using (MySqlCommand command =
+                        new MySqlCommand(sql, connection))
+                    {
+                        command.Parameters.Add(
+                            "@status",
+                            MySqlDbType.VarChar,
+                            20
+                        ).Value = status;
+
+                        command.Parameters.Add(
+                            "@managerComment",
+                            MySqlDbType.VarChar,
+                            1000
+                        ).Value = String.IsNullOrWhiteSpace(managerComment)
+                            ? (object)DBNull.Value
+                            : managerComment;
+
+                        command.Parameters.Add(
+                            "@feedbackId",
+                            MySqlDbType.Int64
+                        ).Value = feedbackId.Value;
+
+                        connection.Open();
+
+                        if (command.ExecuteNonQuery() == 0)
+                        {
+                            return StatusUpdateResponse.Failure(
+                                "The selected feedback could not be found.");
+                        }
+                    }
+
+                    return StatusUpdateResponse.Success();
+                }
+                catch (Exception)
+                {
+                    return StatusUpdateResponse.Failure(
+                        "The feedback status could not be updated right now.");
+                }
+            }
+
+        }
+
+        public class FeedbackResponse
     {
         public bool Ok { get; set; }
         public string Message { get; set; }
@@ -239,7 +392,10 @@ LIMIT 1;";
         public string ProblemHeader { get; set; }
         public string ProposedSolution { get; set; }
         public string Category { get; set; }
+        public string Status { get; set; }
+        public string ManagerComment { get; set; }
         public string SubmittedAt { get; set; }
+        public int UpvoteCount { get; set; }
     }
 
     public class FeedbackFeedResponse
@@ -263,6 +419,33 @@ LIMIT 1;";
                 Ok = false,
                 Message = message,
                 Items = new List<FeedbackItem>()
+            };
+        }
+    }
+
+    public class UpvoteResponse
+    {
+        public bool Ok { get; set; }
+        public string Message { get; set; }
+        public int UpvoteCount { get; set; }
+
+        public static UpvoteResponse Success(int upvoteCount)
+        {
+            return new UpvoteResponse
+            {
+                Ok = true,
+                Message = null,
+                UpvoteCount = upvoteCount
+            };
+        }
+
+        public static UpvoteResponse Failure(string message)
+        {
+            return new UpvoteResponse
+            {
+                Ok = false,
+                Message = message,
+                UpvoteCount = 0
             };
         }
     }
@@ -292,4 +475,28 @@ LIMIT 1;";
             };
         }
     }
+    public class StatusUpdateResponse
+    {
+        public bool Ok { get; set; }
+        public string Message { get; set; }
+
+        public static StatusUpdateResponse Success()
+        {
+            return new StatusUpdateResponse
+            {
+                Ok = true,
+                Message = "The feedback status was updated."
+            };
+        }
+
+        public static StatusUpdateResponse Failure(string message)
+        {
+            return new StatusUpdateResponse
+            {
+                Ok = false,
+                Message = message
+            };
+        }
     }
+
+

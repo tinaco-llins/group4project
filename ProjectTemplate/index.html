@@ -174,6 +174,34 @@
            white-space: pre-wrap;
        }
 
+       .feed-item-actions {
+           display: flex;
+           align-items: center;
+           gap: 10px;
+           margin-top: 14px;
+       }
+
+       .upvote-button {
+           width: auto;
+           height: auto;
+           margin: 0;
+           padding: 8px 12px;
+           color: var(--brand-dark);
+           background: var(--success-bg);
+           border: 1px solid #cce0da;
+           font-size: 13px;
+       }
+
+       .upvote-button:hover { background: #dcefe9; transform: none; }
+
+       .upvote-count {
+           color: var(--muted);
+           font-size: 13px;
+           font-weight: 700;
+       }
+
+       .upvote-error { color: var(--danger); font-size: 13px; }
+
         @media (max-width: 820px) {
             main { margin-top: 24px; }
             .card { padding: 26px; }
@@ -285,9 +313,7 @@
                 Welcome, <strong id="managerDisplayName"></strong>.
             </p>
 
-            <p>
-                You are successfully logged in.
-            </p>
+          <div id="managerFeedbackList"></div>
         </section>
     </main>
 
@@ -383,7 +409,8 @@
 
                 items.forEach(function (item) {
                     var $entry = $('<div class="feed-item"></div>');
-
+                    var currentStatus = item.Status || "Pending";
+                    var managerComment = item.ManagerComment || "";
                     $entry.append(
                         '<div class="feed-item-meta">' +
                         '<span class="feed-category">' + escapeHtml(item.Category) + '</span>' +
@@ -395,10 +422,174 @@
                     $entry.append('<h3>' + escapeHtml(item.ProblemHeader) + '</h3>');
 
                     $entry.append('<p>' + escapeHtml(item.ProposedSolution) + '</p>');
+                    $entry.append('<p><strong>Status:</strong> ' + escapeHtml(currentStatus) + '</p>');
+
+                    if (managerComment) {
+                        $entry.append(
+                            '<p><strong>Manager comment:</strong> ' + escapeHtml(managerComment) + '</p>'
+                        );
+                    }
+
+                    var voteLabel = item.UpvoteCount === 1 ? "upvote" : "upvotes";
+                    $entry.append(
+                        '<div class="feed-item-actions">' +
+                        '<button type="button" class="upvote-button" data-feedback-id="' +
+                        escapeHtml(item.Id) + '">&#9650; Upvote</button>' +
+                        '<span class="upvote-count" aria-live="polite">' +
+                        escapeHtml(item.UpvoteCount) + ' ' + voteLabel + '</span>' +
+                        '<span class="upvote-error" role="status"></span>' +
+                        '</div>'
+                    );
+                    if (managerLoggedIn) {
+                        var $managerControls = $(
+                            '<div class="manager-controls">' +
+                            '<label>Status</label>' +
+                            '<select class="manager-status">' +
+                            '<option value="Pending">Pending</option>' +
+                            '<option value="Accepted">Accepted</option>' +
+                            '<option value="Denied">Denied</option>' +
+                            '</select>' +
+                            '<label>Manager comment</label>' +
+                            '<textarea class="manager-comment" maxlength="1000" ' +
+                            'placeholder="Optional explanation"></textarea>' +
+                            '<button type="button" class="update-status-button">' +
+                            'Update status' +
+                            '</button>' +
+                            '<div class="manager-update-message" role="status"></div>' +
+                            '</div>'
+                        );
+
+                        $managerControls
+                            .find(".manager-status")
+                            .val(currentStatus);
+
+                        $managerControls
+                            .find(".manager-comment")
+                            .val(managerComment);
+
+                        $managerControls.attr(
+                            "data-feedback-id",
+                            item.Id
+                        );
+
+                        $entry.append($managerControls);
+                    }
+
+
 
                     $feedList.append($entry);
                 });
             }
+
+            $feedList.on("click", ".upvote-button", function () {
+                var $voteButton = $(this);
+                var feedbackId = parseInt($voteButton.attr("data-feedback-id"), 10);
+                var $actions = $voteButton.closest(".feed-item-actions");
+                var $voteCount = $actions.find(".upvote-count");
+                var $voteError = $actions.find(".upvote-error");
+
+                $voteError.empty();
+                if (!feedbackId || feedbackId <= 0) {
+                    $voteError.text("This suggestion has an invalid feedback ID.");
+                    return;
+                }
+
+                $voteButton.prop("disabled", true).text("Upvoting...");
+
+                $.ajax({
+                    type: "POST",
+                    url: "ProjectServices.asmx/UpvoteFeedback",
+                    data: JSON.stringify({ feedbackId: feedbackId }),
+                    contentType: "application/json; charset=utf-8",
+                    dataType: "json"
+                }).done(function (response) {
+                    var result = response.d;
+
+                    if (result.Ok) {
+                        var voteLabel = result.UpvoteCount === 1 ? "upvote" : "upvotes";
+                        $voteCount.text(result.UpvoteCount + " " + voteLabel);
+                    } else {
+                        $voteError.text(result.Message);
+                    }
+                }).fail(function () {
+                    $voteError.text("We could not record your upvote. Please try again.");
+                }).always(function () {
+                    $voteButton.prop("disabled", false).html("&#9650; Upvote");
+                });
+            });
+
+            $feedList.on("click", ".update-status-button", function () {
+                var $button = $(this);
+                var $controls = $button.closest(".manager-controls");
+                var $message = $controls.find(".manager-update-message");
+
+                var feedbackId = parseInt(
+                    $controls.attr("data-feedback-id"),
+                    10
+                );
+
+                var status = $controls.find(".manager-status").val();
+                var managerComment = $controls
+                    .find(".manager-comment")
+                    .val()
+                    .trim();
+
+                $message
+                    .removeClass("error success")
+                    .hide()
+                    .empty();
+
+                if (!feedbackId || feedbackId <= 0) {
+                    $message
+                        .addClass("error")
+                        .text("This suggestion has an invalid feedback ID.")
+                        .show();
+
+                    return;
+                }
+
+                $button
+                    .prop("disabled", true)
+                    .text("Updating...");
+
+                $.ajax({
+                    type: "POST",
+                    url: "ProjectServices.asmx/UpdateFeedbackStatus",
+                    data: JSON.stringify({
+                        feedbackId: feedbackId,
+                        status: status,
+                        managerComment: managerComment
+                    }),
+                    contentType: "application/json; charset=utf-8",
+                    dataType: "json"
+                }).done(function (response) {
+                    var result = response.d;
+
+                    if (result.Ok) {
+                        $message
+                            .addClass("success")
+                            .text(result.Message)
+                            .show();
+
+                        loadFeed();
+                    } else {
+                        $message
+                            .addClass("error")
+                            .text(result.Message)
+                            .show();
+                    }
+                }).fail(function () {
+                    $message
+                        .addClass("error")
+                        .text("The feedback status could not be updated. Please try again.")
+                        .show();
+                }).always(function () {
+                    $button
+                        .prop("disabled", false)
+                        .text("Update status");
+                });
+            });
+
 
             function loadFeed() {
                 $feedStatus.removeClass("error success").hide().empty();
@@ -439,6 +630,7 @@
             var $managerPassword = $("#managerPassword");
             var $managerLoginButton = $("#managerLoginButton");
             var $loginStatus = $("#loginStatus");
+            var managerLoggedIn = false;
 
             $managerLoginForm.on("submit", function (event) {
                 event.preventDefault();
@@ -472,9 +664,13 @@
                     var result = response.d;
 
                     if (result.Ok) {
+                        managerLoggedIn = true;
+
                         $("#managerLoginCard").hide();
                         $("#managerDisplayName").text(result.Username);
                         $("#managerDashboard").show();
+
+                        loadFeed();
                     }
                     else {
                         $loginStatus
