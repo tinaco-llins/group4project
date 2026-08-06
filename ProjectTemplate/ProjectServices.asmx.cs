@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Configuration;
+using System.Runtime.Remoting.Messaging;
 using System.Security.Cryptography.X509Certificates;
 using System.Web.Services;
 using MySql.Data.MySqlClient;
@@ -21,6 +22,11 @@ namespace ProjectTemplate
         private static readonly string[] AllowedStatuses =
         {
             "Pending", "Accepted", "Denied"
+        };
+
+        private static readonly string[] AllowedDayNames =
+        {
+            "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
         };
 
         private string GetConnectionString()
@@ -103,7 +109,7 @@ namespace ProjectTemplate
             }
         }
 
-    [WebMethod]
+        [WebMethod]
         public FeedbackFeedResponse GetFeedbackFeed()
         {
             //Return every submitted suggestion, newest first, for the employee-facing feed. No identifying info is returned since submissions are anonymous.
@@ -117,19 +123,20 @@ Order BY submitted_at_utc DESC;";
             try
             {
                 using (MySqlConnection connection = new MySqlConnection(GetConnectionString()))
-                
-                using (MySqlCommand command = new MySqlCommand(sql,connection))
+
+                using (MySqlCommand command = new MySqlCommand(sql, connection))
                 {
                     connection.Open();
 
                     using (MySqlDataReader reader = command.ExecuteReader())
                     {
                         while (reader.Read())
-                            {
+                        {
                             items.Add(new FeedbackItem
-                                {
-                                Id = reader.GetInt64("feedback_id"), 
+                            {
+                                Id = reader.GetInt64("feedback_id"),
                                 ReferenceNumber = reader.GetString("reference_number"),
+                                ProblemHeader = reader.GetString("problem_header"),
                                 ProposedSolution = reader.GetString("proposed_solution"),
                                 Category = reader.GetString("Category"),
                                 UpvoteCount = reader.GetInt32("upvote_count"),
@@ -150,7 +157,7 @@ Order BY submitted_at_utc DESC;";
                 return FeedbackFeedResponse.Failure(
                     "We could not load the feedback feed right now. Please try again.");
             }
-        
+
         }
 
         [WebMethod]
@@ -271,91 +278,306 @@ LIMIT 1;";
                     );
             }
         }
-            [WebMethod(EnableSession = true)]
-            public StatusUpdateResponse UpdateFeedbackStatus(
-                long? feedbackId,
-                string status,
-                string managerComment)
+        [WebMethod(EnableSession = true)]
+        public StatusUpdateResponse UpdateFeedbackStatus(
+            long? feedbackId,
+            string status,
+            string managerComment)
+        {
+            if (Session["ManagerLoggedIn"] == null ||
+                !(bool)Session["ManagerLoggedIn"])
             {
-                if (Session["ManagerLoggedIn"] == null ||
-                    !(bool)Session["ManagerLoggedIn"])
-                {
-                    return StatusUpdateResponse.Failure(
-                        "You must be logged in as a manager.");
-                }
+                return StatusUpdateResponse.Failure(
+                    "You must be logged in as a manager.");
+            }
 
-                if (!feedbackId.HasValue || feedbackId.Value <= 0)
-                {
-                    return StatusUpdateResponse.Failure(
-                        "A valid feedback ID is required.");
-                }
+            if (!feedbackId.HasValue || feedbackId.Value <= 0)
+            {
+                return StatusUpdateResponse.Failure(
+                    "A valid feedback ID is required.");
+            }
 
-                status = (status ?? String.Empty).Trim();
-                managerComment = (managerComment ?? String.Empty).Trim();
+            status = (status ?? String.Empty).Trim();
+            managerComment = (managerComment ?? String.Empty).Trim();
 
-                if (Array.IndexOf(AllowedStatuses, status) < 0)
-                {
-                    return StatusUpdateResponse.Failure(
-                        "Please select a valid status.");
-                }
+            if (Array.IndexOf(AllowedStatuses, status) < 0)
+            {
+                return StatusUpdateResponse.Failure(
+                    "Please select a valid status.");
+            }
 
-                if (managerComment.Length > 1000)
-                {
-                    return StatusUpdateResponse.Failure(
-                        "The manager comment cannot exceed 1,000 characters.");
-                }
+            if (managerComment.Length > 1000)
+            {
+                return StatusUpdateResponse.Failure(
+                    "The manager comment cannot exceed 1,000 characters.");
+            }
 
-                const string sql = @"
+            const string sql = @"
 UPDATE anonymous_feedback
 SET status = @status,
     manager_comment = @managerComment
 WHERE feedback_id = @feedbackId;";
 
-                try
+            try
+            {
+                using (MySqlConnection connection =
+                    new MySqlConnection(GetConnectionString()))
+                using (MySqlCommand command =
+                    new MySqlCommand(sql, connection))
                 {
-                    using (MySqlConnection connection =
-                        new MySqlConnection(GetConnectionString()))
-                    using (MySqlCommand command =
-                        new MySqlCommand(sql, connection))
+                    command.Parameters.Add(
+                        "@status",
+                        MySqlDbType.VarChar,
+                        20
+                    ).Value = status;
+
+                    command.Parameters.Add(
+                        "@managerComment",
+                        MySqlDbType.VarChar,
+                        1000
+                    ).Value = String.IsNullOrWhiteSpace(managerComment)
+                        ? (object)DBNull.Value
+                        : managerComment;
+
+                    command.Parameters.Add(
+                        "@feedbackId",
+                        MySqlDbType.Int64
+                    ).Value = feedbackId.Value;
+
+                    connection.Open();
+
+                    if (command.ExecuteNonQuery() == 0)
                     {
-                        command.Parameters.Add(
-                            "@status",
-                            MySqlDbType.VarChar,
-                            20
-                        ).Value = status;
-
-                        command.Parameters.Add(
-                            "@managerComment",
-                            MySqlDbType.VarChar,
-                            1000
-                        ).Value = String.IsNullOrWhiteSpace(managerComment)
-                            ? (object)DBNull.Value
-                            : managerComment;
-
-                        command.Parameters.Add(
-                            "@feedbackId",
-                            MySqlDbType.Int64
-                        ).Value = feedbackId.Value;
-
-                        connection.Open();
-
-                        if (command.ExecuteNonQuery() == 0)
-                        {
-                            return StatusUpdateResponse.Failure(
-                                "The selected feedback could not be found.");
-                        }
+                        return StatusUpdateResponse.Failure(
+                            "The selected feedback could not be found.");
                     }
+                }
 
-                    return StatusUpdateResponse.Success();
-                }
-                catch (Exception)
-                {
-                    return StatusUpdateResponse.Failure(
-                        "The feedback status could not be updated right now.");
-                }
+                return StatusUpdateResponse.Success();
+            }
+            catch (Exception)
+            {
+                return StatusUpdateResponse.Failure(
+                    "The feedback status could not be updated right now.");
+            }
+        }
+
+        [WebMethod(EnableSession = true)]
+        public PulseConfigResponse SavePulseQuestion(string questionText, int dayOfWeek, string sendTime)
+        {
+            if (Session["ManagerLoggedIn"] == null || !(bool)Session["ManagerLoggedIn"])
+            {
+                return PulseConfigResponse.Failure("You must be logged in as a manager to configure the pulse question.");
             }
 
+            questionText = (questionText ?? String.Empty).Trim();
+            if (questionText.Length < 5 || questionText.Length > 280)
+            {
+                return PulseConfigResponse.Failure("Question text must be between 5 and 280 characters.");
+            }
+
+            if (dayOfWeek < 0 || dayOfWeek > 6)
+            {
+                return PulseConfigResponse.Failure("Please choose a valid day of the week.");
+            }
+
+            TimeSpan parsedTime;
+            if (!TimeSpan.TryParse(sendTime, out parsedTime))
+            {
+                return PulseConfigResponse.Failure("Please provide a valid send time (e.g. 09:00).");
+            }
+
+            string managerUsername = Session["ManagerUsername"] as string;
+
+            try
+            {
+                using (MySqlConnection connection = new MySqlConnection(GetConnectionString()))
+                {
+                    connection.Open();
+                    MySqlTransaction transaction = connection.BeginTransaction();
+
+                    try
+                    {
+                        long managerId;
+                        using (MySqlCommand lookupCommand = new MySqlCommand(
+                            "SELECT manager_id FROM managers WHERE username = @username LIMIT 1;",
+                            connection, transaction))
+                        {
+                            lookupCommand.Parameters.Add("@username", MySqlDbType.VarChar, 50).Value = managerUsername;
+                            object result = lookupCommand.ExecuteScalar();
+                            if (result == null)
+                            {
+                                transaction.Rollback();
+                                return PulseConfigResponse.Failure("Could not identify the logged-in manager.");
+                            }
+                            managerId = Convert.ToInt64(result);
+                        }
+
+                        using (MySqlCommand deactivateCommand = new MySqlCommand(
+                            "UPDATE pulse_questions SET is_active = 0 WHERE is_active = 1;",
+                            connection, transaction))
+                        {
+                            deactivateCommand.ExecuteNonQuery();
+                        }
+
+                        int newQuestionId;
+                        using (MySqlCommand insertCommand = new MySqlCommand(@" 
+                            INSERT INTO pulse_questions (question_text, day_of_week, send_time, is_active, created_by)
+                            VALUES (@questionText, @dayOfWeek, @sendTime, 1, @createdBy);
+                            SELECT LAST_INSERT_ID();",
+                            connection, transaction))
+                        {
+                            insertCommand.Parameters.Add("@questionText", MySqlDbType.VarChar, 280).Value = questionText;
+                            insertCommand.Parameters.Add("@dayOfWeek", MySqlDbType.Byte).Value = dayOfWeek;
+                            insertCommand.Parameters.Add("@sendTime", MySqlDbType.Time).Value = parsedTime;
+                            insertCommand.Parameters.Add("@createdBy", MySqlDbType.Int64).Value = managerId;
+
+                            newQuestionId = Convert.ToInt32(insertCommand.ExecuteScalar());
+                        }
+
+                        transaction.Commit();
+
+                        return PulseConfigResponse.Success(new PulseQuestionConfig
+                        {
+                            QuestionId = newQuestionId,
+                            QuestionText = questionText,
+                            DayOfWeek = dayOfWeek,
+                            DayName = AllowedDayNames[dayOfWeek],
+                            SendTime = parsedTime.ToString(@"hh\:mm")
+                        });
+                    }
+                    catch
+                    {
+                        transaction.Rollback();
+                        throw;
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                return PulseConfigResponse.Failure("Could not save the pulse question right now. Please try again.");
+            }
         }
+
+        [WebMethod(EnableSession = true)]
+        public PulseConfigResponse GetPulseQuestionConfig()
+        {
+            if (Session["ManagerLoggedIn"] == null || !(bool)Session["ManagerLoggedIn"])
+            {
+                return PulseConfigResponse.Failure("You must be logged in as a manager.");
+            }
+
+            const string sql = @"
+             SELECT question_id, question_text, day_of_week, send_time
+             FROM pulse_questions
+             WHERE is_active = 1
+             LIMIT 1;";
+
+            try
+            {
+                using (MySqlConnection connection = new MySqlConnection(GetConnectionString()))
+                using (MySqlCommand command = new MySqlCommand(sql, connection))
+                {
+                    connection.Open();
+                    using (MySqlDataReader reader = command.ExecuteReader())
+                    {
+                        if (!reader.Read())
+                        {
+                            return PulseConfigResponse.Success(null);
+                        }
+
+                        int dayOfWeek = reader.GetByte("day_of_week");
+                        return PulseConfigResponse.Success(new PulseQuestionConfig
+                        {
+                            QuestionId = reader.GetInt32("question_id"),
+                            QuestionText = reader.GetString("question_text"),
+                            DayOfWeek = dayOfWeek,
+                            DayName = AllowedDayNames[dayOfWeek],
+                            SendTime = reader.GetTimeSpan("send_time").ToString(@"hh\:mm")
+                        });
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                return PulseConfigResponse.Failure("Could not load the current pulse question.");
+            }
+        }
+
+        [WebMethod]
+        public PulseConfigResponse GetCurrentPulseQuestion()
+        {
+            const string sql = @"
+             SELECT question_id, question_text
+             FROM pulse_questions
+             WHERE is_active = 1
+             LIMIT 1;";
+
+            try
+            {
+                using (MySqlConnection connection = new MySqlConnection(GetConnectionString()))
+                using (MySqlCommand command = new MySqlCommand(sql, connection))
+                {
+                    connection.Open();
+                    using (MySqlDataReader reader = command.ExecuteReader())
+                    {
+                        if (!reader.Read())
+                        {
+                            return PulseConfigResponse.Success(null);
+                        }
+
+                        return PulseConfigResponse.Success(new PulseQuestionConfig
+                        {
+                            QuestionId = reader.GetInt32("question_id"),
+                            QuestionText = reader.GetString("question_text")
+                        });
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                return PulseConfigResponse.Failure("Could not load this week's pulse question.");
+            }
+        }
+
+        [WebMethod]
+        public PulseSubmitResponse SubmitPulseResponse(int questionId, string responseValue)
+        {
+            if (questionId <= 0)
+            {
+                return PulseSubmitResponse.Failure("Invalid question.");
+            }
+
+            responseValue = (responseValue ?? String.Empty).Trim();
+            if (responseValue.Length == 0 || responseValue.Length > 500)
+            {
+                return PulseSubmitResponse.Failure("Please provide a response (up to 500 characters).");
+            }
+
+            const string sql = @"
+             INSERT INTO pulse_responses (question_id, response_value)
+             VALUES (@questionId, @responseValue);";
+
+            try
+            {
+                using (MySqlConnection connection = new MySqlConnection(GetConnectionString()))
+                using (MySqlCommand command = new MySqlCommand(sql, connection))
+                {
+                    command.Parameters.Add("@questionId", MySqlDbType.Int32).Value = questionId;
+                    command.Parameters.Add("@responseValue", MySqlDbType.VarChar, 500).Value = responseValue;
+
+                    connection.Open();
+                    command.ExecuteNonQuery();
+                }
+
+                return PulseSubmitResponse.Success();
+            }
+            catch (Exception)
+            {
+                return PulseSubmitResponse.Failure("Could not record your response. Please try again.");
+            }
+        }
+    }
 
         public class FeedbackResponse
     {
@@ -499,4 +721,45 @@ WHERE feedback_id = @feedbackId;";
         }
     }
 
+public class PulseQuestionConfig
+{
+    public int QuestionId { get; set; }
+    public string QuestionText { get; set; }
+    public int DayOfWeek { get; set; }
+    public string DayName { get; set; }
+    public string SendTime { get; set; }
+}
+
+public class PulseConfigResponse
+{
+    public bool Ok { get; set; }
+    public string Message { get; set; }
+    public PulseQuestionConfig Question { get; set; }
+
+    public static PulseConfigResponse Success(PulseQuestionConfig question)
+    {
+        return new PulseConfigResponse { Ok = true, Message = null, Question = question };
+    }
+
+    public static PulseConfigResponse Failure(string message)
+    {
+        return new PulseConfigResponse { Ok = false, Message = message, Question = null };
+    }
+}
+
+public class PulseSubmitResponse
+{
+    public bool Ok { get; set; }
+    public string Message { get; set; }
+
+    public static PulseSubmitResponse Success()
+    {
+        return new PulseSubmitResponse { Ok = true, Message = "Thanks for your feedback!" };
+    }
+
+    public static PulseSubmitResponse Failure(string message)
+    {
+        return new PulseSubmitResponse { Ok = false, Message = message };
+    }
+}
 
