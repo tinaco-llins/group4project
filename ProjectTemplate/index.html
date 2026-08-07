@@ -132,6 +132,17 @@
 
        .feed-refresh:hover { background: var(--success-bg); transform: none; }
 
+       .feed-filters {
+           display: grid;
+           grid-template-columns: repeat(2, minmax(0, 1fr));
+           gap: 14px;
+           margin: 24px 0;
+       }
+
+       .feed-filter label {
+           margin: 0 0 7px;
+       }
+
        .feed-empty, .feed-loading {
            color: var(--muted);
            font-size: 14px;
@@ -220,6 +231,7 @@
         @media (max-width: 820px) {
             main { margin-top: 24px; }
             .card { padding: 26px; }
+            .feed-filters { grid-template-columns: 1fr; }
         }
     </style>
 </head>
@@ -278,6 +290,31 @@
                     </p>
                 </div>
                 <button id="feedRefreshButton" type="button" class="feed-refresh">Refresh</button>
+            </div>
+
+            <div class="feed-filters" aria-label="Suggestion filters">
+                <div class="feed-filter">
+                    <label for="feedCategoryFilter">Category</label>
+                    <select id="feedCategoryFilter">
+                        <option value="">All categories</option>
+                        <option>Technology</option>
+                        <option>Tools</option>
+                        <option>Interpersonal</option>
+                        <option>Culture</option>
+                        <option>Benefits</option>
+                        <option>Salary</option>
+                    </select>
+                </div>
+
+                <div class="feed-filter">
+                    <label for="feedStatusFilter">Status</label>
+                    <select id="feedStatusFilter">
+                        <option value="">All statuses</option>
+                        <option>Pending</option>
+                        <option>Accepted</option>
+                        <option>Denied</option>
+                    </select>
+                </div>
             </div>
 
             <div id="feedLoading" class="feed-loading">Loading suggestions...</div>
@@ -444,17 +481,24 @@
             var $feedStatus = $("#feedStatus");
             var $feedList = $("#feedList");
             var $feedRefreshButton = $("#feedRefreshButton");
+            var $feedCategoryFilter = $("#feedCategoryFilter");
+            var $feedStatusFilter = $("#feedStatusFilter");
+            var feedItems = [];
 
             function escapeHtml(value){
                 return $("<div>").text(value).html();
             }
 
-            function renderFeed(items) {
+            function renderFeed(items, filtersApplied) {
                 $feedList.empty();
                 
                 if (!items || items.length === 0){
                     $feedList.append(
-                        '<div class="feed-empty">No suggestions have been submitted yet.</div>');
+                        '<div class="feed-empty">' +
+                        (filtersApplied
+                            ? 'No suggestions match the selected filters.'
+                            : 'No suggestions have been submitted yet.') +
+                        '</div>');
                         return;
                 }
 
@@ -531,6 +575,26 @@
                     $feedList.append($entry);
                 });
             }
+
+            function applyFeedFilters() {
+                var selectedCategory = $feedCategoryFilter.val();
+                var selectedStatus = $feedStatusFilter.val();
+                var filteredItems = feedItems.filter(function (item) {
+                    var categoryMatches = !selectedCategory ||
+                        item.Category === selectedCategory;
+                    var statusMatches = !selectedStatus ||
+                        item.Status === selectedStatus;
+
+                    return categoryMatches && statusMatches;
+                });
+
+                renderFeed(
+                    filteredItems,
+                    Boolean(selectedCategory || selectedStatus)
+                );
+            }
+
+            $feedCategoryFilter.add($feedStatusFilter).on("change", applyFeedFilters);
 
             $feedList.on("click", ".upvote-button", function () {
                 var $voteButton = $(this);
@@ -657,7 +721,8 @@
                     var result = response.d;
 
                     if (result.Ok){
-                        renderFeed(result.Items);
+                        feedItems = result.Items || [];
+                        applyFeedFilters();
                     } else {
                         $feedStatus.addClass("error").text(result.Message).show();
                     }
