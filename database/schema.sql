@@ -53,3 +53,21 @@ UNIQUE KEY uq_manager_username (username)
 
 INSERT IGNORE INTO managers (username, password_hash)
 VALUES ('manager', SHA2('password123', 256));
+
+CREATE TABLE IF NOT EXISTS digest_subscribers (
+subscriber_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+email VARCHAR(255) NOT NULL,
+subscribed_at_utc DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+PRIMARY KEY (subscriber_id),
+UNIQUE KEY uq_digest_email (email)
+) ENGINE=InnoDB;
+
+
+CREATE TABLE IF NOT EXISTS digest_schedule (
+    schedule_id INT NOT NULL PRIMARY KEY,
+    last_sent_at_utc DATETIME NULL
+);
+
+INSERT IGNORE INTO digest_schedule (schedule_id, last_sent_at_utc)
+VALUES (1, NULL);

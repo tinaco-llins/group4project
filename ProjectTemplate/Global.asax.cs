@@ -12,6 +12,17 @@ namespace ProjectTemplate
         protected void Application_Start()
         {
             GlobalConfiguration.Configure(WebApiConfig.Register);
+            ProjectServices services = new ProjectServices();
+
+            try
+            {
+                services.SendDigestIfDue();
+            }
+            catch (Exception)
+            {
+                // Do not prevent website from starting if digest fails.
+            }
+
         }
     }
 }

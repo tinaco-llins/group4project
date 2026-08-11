@@ -262,7 +262,7 @@
 
                 <label for="problem_header">Problem header</label>
                 <input id="problem_header" type="text" minlength="5" maxlength="120"
-                    placeholder="Briefly summarize the problem" required />
+                       placeholder="Briefly summarize the problem" required />
                 <div class="field-meta">
                     <span>5–120 characters</span>
                     <span id="headerCharacterCount">0 / 120</span>
@@ -270,7 +270,7 @@
 
                 <label for="proposed_solution">Proposed solution</label>
                 <textarea id="proposed_solution" minlength="5" maxlength="2000"
-                    placeholder="Describe how you think this could be improved…" required></textarea>
+                          placeholder="Describe how you think this could be improved…" required></textarea>
                 <div class="field-meta">
                     <span>Minimum 5 characters</span>
                     <span id="solutionCharacterCount">0 / 2,000</span>
@@ -325,6 +325,31 @@
 
         </section>
 
+        <section id="digestCard" class="card">
+            <h2>Weekly Suggestion Digest</h2>
+
+            <p class="card-subtitle">
+                Get the top suggestions delivered to your inbox each week.
+            </p>
+
+            <form id="digestForm" novalidate>
+                <label for="digestEmail">Email</label>
+
+                <input id="digestEmail"
+                       type="email"
+                       maxlength="255"
+                       autocomplete="email"
+                       placeholder="Enter your email"
+                       required />
+
+                <button id="digestSubscribeButton" type="submit">
+                    Subscribe
+                </button>
+
+                <div id="digestStatus" class="status"></div>
+            </form>
+        </section>
+
         <section id="managerLoginCard" class="card">
             <h2>Manager Login</h2>
 
@@ -334,34 +359,28 @@
 
             <form id="managerLoginForm" novalidate>
                 <label for="managerUsername">Username</label>
-                <input
-                       id="managerUsername"
+                <input id="managerUsername"
                        type="text"
                        maxlength="50"
                        autocomplete="username"
                        placeholder="Enter Username"
-                       required
-                       />
+                       required />
 
                 <label for="managerPassword">Password</label>
-                <input
-                       id="managerPassword"
+                <input id="managerPassword"
                        type="password"
                        autocomplete="current-password"
                        placeholder="Enter Password"
-                       required
-                       />
+                       required />
 
                 <button id="managerLoginButton" type="submit">
                     Log in
                 </button>
 
-                <div
-                     id="loginStatus"
+                <div id="loginStatus"
                      class="status"
                      role="status"
-                     aria-live="polite"
-                     ></div>
+                     aria-live="polite"></div>
             </form>
         </section>
 
@@ -372,36 +391,36 @@
                 Welcome, <strong id="managerDisplayName"></strong>.
             </p>
 
-          <div class="pulse-panel">
-              <h2 style="margin-top:0;">Weekly Pulse Question</h2>
-              <p class="card-subtitle">Configure the single question employees see each week.</p>
+            <div class="pulse-panel">
+                <h2 style="margin-top:0;">Weekly Pulse Question</h2>
+                <p class="card-subtitle">Configure the single question employees see each week.</p>
 
-              <div id="pulseCurrentConfig" class="pulse-current"></div>
+                <div id="pulseCurrentConfig" class="pulse-current"></div>
 
-              <form id="pulseConfigForm" novalidate>
-                  <label for="pulseQuestionText">Question</label>
-                  <textarea id="pulseQuestionText" maxlength="280" placeholder="e.g. How energized do you feel about your work this week?" required></textarea>
+                <form id="pulseConfigForm" novalidate>
+                    <label for="pulseQuestionText">Question</label>
+                    <textarea id="pulseQuestionText" maxlength="280" placeholder="e.g. How energized do you feel about your work this week?" required></textarea>
 
-                  <label for="pulseDayOfWeek">Send on</label>
-                  <select id="pulseDayOfWeek" required>
-                      <option value="0">Sunday</option>
-                      <option value="1" selected>Monday</option>
-                      <option value="2">Tuesday</option>
-                      <option value="3">Wednesday</option>
-                      <option value="4">Thursday</option>
-                      <option value="5">Friday</option>
-                      <option value="6">Saturday</option>
-                  </select>
+                    <label for="pulseDayOfWeek">Send on</label>
+                    <select id="pulseDayOfWeek" required>
+                        <option value="0">Sunday</option>
+                        <option value="1" selected>Monday</option>
+                        <option value="2">Tuesday</option>
+                        <option value="3">Wednesday</option>
+                        <option value="4">Thursday</option>
+                        <option value="5">Friday</option>
+                        <option value="6">Saturday</option>
+                    </select>
 
-                  <label for="pulseSendTime">At</label>
-                  <input id="pulseSendTime" type="time" value="09:00" required />
+                    <label for="pulseSendTime">At</label>
+                    <input id="pulseSendTime" type="time" value="09:00" required />
 
-                  <button id="pulseConfigSubmit" type="submit">Save pulse question</button>
-                  <div id="pulseConfigStatus" class="status" role="status" aria-live="polite"></div>
-              </form>
-          </div>
+                    <button id="pulseConfigSubmit" type="submit">Save pulse question</button>
+                    <div id="pulseConfigStatus" class="status" role="status" aria-live="polite"></div>
+                </form>
+            </div>
 
-          <div id="managerFeedbackList"></div>
+            <div id="managerFeedbackList"></div>
         </section>
     </main>
 
@@ -947,6 +966,54 @@
                     $pulseConfigSubmit.prop("disabled", false).text("Save pulse question");
                 });
             });
+
+            $("#digestForm").on("submit", function (event) {
+    event.preventDefault();
+
+    var email = $("#digestEmail").val().trim();
+    var $status = $("#digestStatus");
+    var $button = $("#digestSubscribeButton");
+
+    $status.removeClass("error success").hide().empty();
+
+    if (!email) {
+        $status.addClass("error").text("Please enter an email address.").show();
+        return;
+    }
+
+    $button.prop("disabled", true).text("Subscribing...");
+
+    $.ajax({
+        type: "POST",
+        url: "ProjectServices.asmx/SubscribeToDigest",
+        data: JSON.stringify({ email: email }),
+        contentType: "application/json; charset=utf-8",
+        dataType: "json"
+    }).done(function (response) {
+        var result = response.d;
+
+        if (result.Ok) {
+            $status
+                .addClass("success")
+                .text(result.Message)
+                .show();
+
+            $("#digestEmail").val("");
+        } else {
+            $status
+                .addClass("error")
+                .text(result.Message)
+                .show();
+        }
+    }).fail(function () {
+        $status
+            .addClass("error")
+            .text("Could not subscribe right now. Please try again.")
+            .show();
+    }).always(function () {
+        $button.prop("disabled", false).text("Subscribe");
+    });
+});
 
         })();
     </script>

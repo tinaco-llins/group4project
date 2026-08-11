@@ -5,6 +5,9 @@ using System.Runtime.Remoting.Messaging;
 using System.Security.Cryptography.X509Certificates;
 using System.Web.Services;
 using MySql.Data.MySqlClient;
+using System.Net;
+using System.Net.Mail;
+using System.Text;
 
 namespace ProjectTemplate
 {
@@ -41,6 +44,89 @@ namespace ProjectTemplate
             }
 
             return setting.ConnectionString;
+        }
+
+
+        public void SendDigestIfDue()
+        {
+            DateTime? lastSent = null;
+
+            const string getScheduleSql = @"
+        SELECT last_sent_at_utc
+        FROM digest_schedule
+        WHERE schedule_id = 1;";
+
+            using (MySqlConnection connection =
+                new MySqlConnection(GetConnectionString()))
+            using (MySqlCommand command =
+                new MySqlCommand(getScheduleSql, connection))
+            {
+                connection.Open();
+
+                object result = command.ExecuteScalar();
+
+                if (result != null && result != DBNull.Value)
+                {
+                    lastSent = Convert.ToDateTime(result);
+                }
+            }
+
+            if (lastSent.HasValue &&
+                lastSent.Value > DateTime.UtcNow.AddDays(-7))
+            {
+                return;
+            }
+
+            List<string> subscribers = new List<string>();
+
+            const string subscriberSql = @"
+        SELECT email
+        FROM digest_subscribers;";
+
+            using (MySqlConnection connection =
+                new MySqlConnection(GetConnectionString()))
+            using (MySqlCommand command =
+                new MySqlCommand(subscriberSql, connection))
+            {
+                connection.Open();
+
+                using (MySqlDataReader reader = command.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        subscribers.Add(reader.GetString("email"));
+                    }
+                }
+            }
+
+            if (subscribers.Count == 0)
+            {
+                return;
+            }
+
+            foreach (string email in subscribers)
+            {
+                DigestResponse response = SendWeeklyDigest(email);
+
+                if (!response.Ok)
+                {
+                    return;
+                }
+            }
+
+            const string updateSql = @"
+        UPDATE digest_schedule
+        SET last_sent_at_utc = UTC_TIMESTAMP()
+        WHERE schedule_id = 1;";
+
+            using (MySqlConnection connection =
+                new MySqlConnection(GetConnectionString()))
+            using (MySqlCommand command =
+                new MySqlCommand(updateSql, connection))
+            {
+                connection.Open();
+                command.ExecuteNonQuery();
+            }
         }
 
         [WebMethod]
@@ -577,9 +663,194 @@ WHERE feedback_id = @feedbackId;";
                 return PulseSubmitResponse.Failure("Could not record your response. Please try again.");
             }
         }
+        [WebMethod]
+        public DigestResponse GetWeeklyDigest()
+        {
+            const string sql = @"
+        SELECT problem_header, proposed_solution, category, upvote_count
+        FROM anonymous_feedback
+        ORDER BY upvote_count DESC, submitted_at_utc DESC
+        LIMIT 3;";
+
+            StringBuilder digest = new StringBuilder();
+
+            digest.AppendLine("Weekly Suggestion Digest");
+            digest.AppendLine();
+            digest.AppendLine("Here are this week's top suggestions:");
+            digest.AppendLine();
+
+            try
+            {
+                using (MySqlConnection connection =
+                    new MySqlConnection(GetConnectionString()))
+                using (MySqlCommand command =
+                    new MySqlCommand(sql, connection))
+                {
+                    connection.Open();
+
+                    using (MySqlDataReader reader = command.ExecuteReader())
+                    {
+                        int number = 1;
+
+                        while (reader.Read())
+                        {
+                            digest.AppendLine(
+                                number + ". " +
+                                reader.GetString("problem_header"));
+
+                            digest.AppendLine(
+                                "Category: " +
+                                reader.GetString("category"));
+
+                            digest.AppendLine(
+                                "Proposed solution: " +
+                                reader.GetString("proposed_solution"));
+
+                            digest.AppendLine(
+                                "Upvotes: " +
+                                reader.GetInt32("upvote_count"));
+
+                            digest.AppendLine();
+
+                            number++;
+                        }
+
+                        if (number == 1)
+                        {
+                            digest.AppendLine(
+                                "There were no suggestions submitted this week.");
+                        }
+                    }
+                }
+
+                return DigestResponse.Success(digest.ToString());
+            }
+            catch (Exception)
+            {
+                return DigestResponse.Failure(
+                    "The weekly digest could not be generated.");
+            }
+        }
+
+
+
+        [WebMethod]
+        public DigestResponse SendWeeklyDigest(string recipientEmail)
+        {
+            recipientEmail = (recipientEmail ?? String.Empty).Trim();
+
+            if (String.IsNullOrWhiteSpace(recipientEmail))
+            {
+                return DigestResponse.Failure(
+                    "Please provide an email address.");
+            }
+
+            DigestResponse digestResponse = GetWeeklyDigest();
+
+            if (!digestResponse.Ok)
+            {
+                return DigestResponse.Failure(
+                    "The weekly digest could not be generated.");
+            }
+
+            try
+            {
+                string smtpHost =
+                    ConfigurationManager.AppSettings["SmtpHost"];
+
+                int smtpPort =
+                    Convert.ToInt32(
+                        ConfigurationManager.AppSettings["SmtpPort"]);
+
+                string smtpUsername =
+                    ConfigurationManager.AppSettings["SmtpUsername"];
+
+                string smtpPassword =
+                    ConfigurationManager.AppSettings["SmtpPassword"];
+
+                string fromEmail =
+                    ConfigurationManager.AppSettings["DigestFromEmail"];
+
+                using (MailMessage message = new MailMessage())
+                {
+                    message.From = new MailAddress(fromEmail);
+                    message.To.Add(recipientEmail);
+
+                    message.Subject = "Weekly Suggestion Digest";
+                    message.Body = digestResponse.Digest;
+                    message.IsBodyHtml = false;
+
+                    using (SmtpClient client =
+                        new SmtpClient(smtpHost, smtpPort))
+                    {
+                        client.EnableSsl = true;
+
+                        client.Credentials =
+                            new NetworkCredential(
+                                smtpUsername,
+                                smtpPassword);
+
+                        client.Send(message);
+                    }
+                }
+
+                return DigestResponse.Success(
+                    "Weekly digest sent successfully.");
+            }
+            catch (Exception ex)
+            {
+                return DigestResponse.Failure(
+                   ex.InnerException != null
+                   ? ex.InnerException.Message
+                   : ex.Message);
+            }
+        }
+
+        [WebMethod]
+        public DigestSubscriptionResponse SubscribeToDigest(string email)
+        {
+            email = (email ?? String.Empty).Trim();
+
+            if (String.IsNullOrWhiteSpace(email) || !email.Contains("@"))
+            {
+                return DigestSubscriptionResponse.Failure(
+                    "Please enter a valid email address.");
+            }
+
+            const string sql = @"
+        INSERT IGNORE INTO digest_subscribers (email)
+        VALUES (@email);";
+
+            try
+            {
+                using (MySqlConnection connection =
+                    new MySqlConnection(GetConnectionString()))
+                using (MySqlCommand command =
+                    new MySqlCommand(sql, connection))
+                {
+                    command.Parameters.Add(
+                        "@email",
+                        MySqlDbType.VarChar,
+                        255
+                    ).Value = email;
+
+                    connection.Open();
+                    command.ExecuteNonQuery();
+                }
+
+                return DigestSubscriptionResponse.Success();
+            }
+            catch (Exception)
+            {
+                return DigestSubscriptionResponse.Failure(
+                    "Could not subscribe this email right now.");
+            }
+        }
+
     }
 
-        public class FeedbackResponse
+
+    public class FeedbackResponse
     {
         public bool Ok { get; set; }
         public string Message { get; set; }
@@ -762,4 +1033,55 @@ public class PulseSubmitResponse
         return new PulseSubmitResponse { Ok = false, Message = message };
     }
 }
+public class DigestResponse
+{
+    public bool Ok { get; set; }
+    public string Message { get; set; }
+    public string Digest { get; set; }
+
+    public static DigestResponse Success(string digest)
+    {
+        return new DigestResponse
+        {
+            Ok = true,
+            Message = null,
+            Digest = digest
+        };
+    }
+
+    public static DigestResponse Failure(string message)
+    {
+        return new DigestResponse
+        {
+            Ok = false,
+            Message = message,
+            Digest = null
+        };
+    }
+}
+public class DigestSubscriptionResponse
+{
+    public bool Ok { get; set; }
+    public string Message { get; set; }
+
+    public static DigestSubscriptionResponse Success()
+    {
+        return new DigestSubscriptionResponse
+        {
+            Ok = true,
+            Message = "You are subscribed to the weekly digest."
+        };
+    }
+
+    public static DigestSubscriptionResponse Failure(string message)
+    {
+        return new DigestSubscriptionResponse
+        {
+            Ok = false,
+            Message = message
+        };
+    }
+}
+
+
 
