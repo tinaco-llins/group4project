@@ -449,6 +449,142 @@ WHERE feedback_id = @feedbackId;";
         }
 
         [WebMethod(EnableSession = true)]
+        public AnalyticsResponse GetFeedbackAnalytics()
+        {
+            if (Session["ManagerLoggedIn"] == null ||
+                !(bool)Session["ManagerLoggedIn"])
+            {
+                return AnalyticsResponse.Failure(
+                    "You must be logged in as a manager to view analytics.");
+            }
+
+            const string totalSql = @"
+SELECT COUNT(*)
+FROM anonymous_feedback;";
+
+            const string categorySql = @"
+SELECT category AS label, COUNT(*) AS item_count
+FROM anonymous_feedback
+GROUP BY category
+ORDER BY item_count DESC, category ASC;";
+
+            const string statusSql = @"
+SELECT status AS label, COUNT(*) AS item_count
+FROM anonymous_feedback
+GROUP BY status
+ORDER BY item_count DESC, status ASC;";
+
+            const string topSql = @"
+SELECT feedback_id, problem_header, category, status, upvote_count
+FROM anonymous_feedback
+ORDER BY upvote_count DESC, submitted_at_utc DESC
+LIMIT @topLimit;";
+
+            const string trendSql = @"
+SELECT DATE(submitted_at_utc) AS submission_date,
+       COUNT(*) AS item_count
+FROM anonymous_feedback
+GROUP BY DATE(submitted_at_utc)
+ORDER BY submission_date ASC;";
+
+            AnalyticsData analytics = new AnalyticsData
+            {
+                CategoryCounts = new List<AnalyticsCount>(),
+                StatusCounts = new List<AnalyticsCount>(),
+                MostUpvoted = new List<AnalyticsSuggestion>(),
+                SubmissionTrend = new List<AnalyticsTrendPoint>()
+            };
+
+            try
+            {
+                using (MySqlConnection connection =
+                    new MySqlConnection(GetConnectionString()))
+                {
+                    connection.Open();
+
+                    using (MySqlCommand totalCommand =
+                        new MySqlCommand(totalSql, connection))
+                    {
+                        analytics.TotalSuggestions = Convert.ToInt32(
+                            totalCommand.ExecuteScalar());
+                    }
+
+                    using (MySqlCommand categoryCommand =
+                        new MySqlCommand(categorySql, connection))
+                    using (MySqlDataReader reader = categoryCommand.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            analytics.CategoryCounts.Add(new AnalyticsCount
+                            {
+                                Label = reader.GetString("label"),
+                                Count = Convert.ToInt32(reader["item_count"])
+                            });
+                        }
+                    }
+
+                    using (MySqlCommand statusCommand =
+                        new MySqlCommand(statusSql, connection))
+                    using (MySqlDataReader reader = statusCommand.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            analytics.StatusCounts.Add(new AnalyticsCount
+                            {
+                                Label = reader.GetString("label"),
+                                Count = Convert.ToInt32(reader["item_count"])
+                            });
+                        }
+                    }
+
+                    using (MySqlCommand topCommand =
+                        new MySqlCommand(topSql, connection))
+                    {
+                        topCommand.Parameters.Add(
+                            "@topLimit", MySqlDbType.Int32).Value = 5;
+
+                        using (MySqlDataReader reader = topCommand.ExecuteReader())
+                        {
+                            while (reader.Read())
+                            {
+                                analytics.MostUpvoted.Add(new AnalyticsSuggestion
+                                {
+                                    Id = reader.GetInt64("feedback_id"),
+                                    ProblemHeader = reader.GetString("problem_header"),
+                                    Category = reader.GetString("category"),
+                                    Status = reader.GetString("status"),
+                                    UpvoteCount = reader.GetInt32("upvote_count")
+                                });
+                            }
+                        }
+                    }
+
+                    using (MySqlCommand trendCommand =
+                        new MySqlCommand(trendSql, connection))
+                    using (MySqlDataReader reader = trendCommand.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            analytics.SubmissionTrend.Add(new AnalyticsTrendPoint
+                            {
+                                Date = reader.GetDateTime("submission_date")
+                                    .ToString("yyyy-MM-dd"),
+                                Count = Convert.ToInt32(reader["item_count"])
+                            });
+                        }
+                    }
+                }
+
+                return AnalyticsResponse.Success(analytics);
+            }
+            catch (Exception)
+            {
+                return AnalyticsResponse.Failure(
+                    "We could not load feedback analytics right now.");
+            }
+        }
+
+        [WebMethod(EnableSession = true)]
         public PulseConfigResponse SavePulseQuestion(string questionText, int dayOfWeek, string sendTime)
         {
             if (Session["ManagerLoggedIn"] == null || !(bool)Session["ManagerLoggedIn"])
@@ -992,6 +1128,63 @@ WHERE feedback_id = @feedbackId;";
         }
     }
 
+    public class AnalyticsData
+    {
+        public int TotalSuggestions { get; set; }
+        public List<AnalyticsCount> CategoryCounts { get; set; }
+        public List<AnalyticsCount> StatusCounts { get; set; }
+        public List<AnalyticsSuggestion> MostUpvoted { get; set; }
+        public List<AnalyticsTrendPoint> SubmissionTrend { get; set; }
+    }
+
+    public class AnalyticsCount
+    {
+        public string Label { get; set; }
+        public int Count { get; set; }
+    }
+
+    public class AnalyticsSuggestion
+    {
+        public long Id { get; set; }
+        public string ProblemHeader { get; set; }
+        public string Category { get; set; }
+        public string Status { get; set; }
+        public int UpvoteCount { get; set; }
+    }
+
+    public class AnalyticsTrendPoint
+    {
+        public string Date { get; set; }
+        public int Count { get; set; }
+    }
+
+    public class AnalyticsResponse
+    {
+        public bool Ok { get; set; }
+        public string Message { get; set; }
+        public AnalyticsData Analytics { get; set; }
+
+        public static AnalyticsResponse Success(AnalyticsData analytics)
+        {
+            return new AnalyticsResponse
+            {
+                Ok = true,
+                Message = null,
+                Analytics = analytics
+            };
+        }
+
+        public static AnalyticsResponse Failure(string message)
+        {
+            return new AnalyticsResponse
+            {
+                Ok = false,
+                Message = message,
+                Analytics = null
+            };
+        }
+    }
+
 public class PulseQuestionConfig
 {
     public int QuestionId { get; set; }
@@ -1082,6 +1275,5 @@ public class DigestSubscriptionResponse
         };
     }
 }
-
 
 
